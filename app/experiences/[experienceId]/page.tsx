@@ -1,60 +1,52 @@
-import { Button } from "@whop/react/components";
+import { verifyUserToken, whopApi } from "@/lib/whop-sdk";
 import { headers } from "next/headers";
-import Link from "next/link";
-import { whopsdk } from "@/lib/whop-sdk";
+import { CoPilotApp } from "@/components/CoPilotApp";
 
 export default async function ExperiencePage({
-	params,
+  params,
 }: {
-	params: Promise<{ experienceId: string }>;
+  params: { experienceId: string };
 }) {
-	const { experienceId } = await params;
-	// Ensure the user is logged in on whop.
-	const { userId } = await whopsdk.verifyUserToken(await headers());
+  const headersList = await headers();
+  const userToken = headersList.get("x-whop-user-token");
+  const userId = await verifyUserToken(userToken ?? "");
 
-	// Fetch the neccessary data we want from whop.
-	const [experience, user, access] = await Promise.all([
-		whopsdk.experiences.retrieve(experienceId),
-		whopsdk.users.retrieve(userId),
-		whopsdk.users.checkAccess(experienceId, { id: userId }),
-	]);
+  if (!userId) {
+    return (
+      <div style={{ minHeight:"100vh", background:"#080c10", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"monospace", color:"#c8d4e0" }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:28, marginBottom:12 }}>⛔</div>
+          <div style={{ color:"#ff4444", letterSpacing:2, fontSize:12 }}>ACCESS DENIED</div>
+          <div style={{ color:"#4a7faa", marginTop:8, fontSize:11 }}>Please log in to your Whop account.</div>
+        </div>
+      </div>
+    );
+  }
 
-	const displayName = user.name || `@${user.username}`;
+  const hasAccess = await whopApi
+    .CheckIfUserHasAccessToExperience({
+      userId,
+      experienceId: params.experienceId,
+    })
+    .then((r) => r.hasAccessToExperience)
+    .catch(() => false);
 
-	return (
-		<div className="flex flex-col p-8 gap-4">
-			<div className="flex justify-between items-center gap-4">
-				<h1 className="text-9">
-					Hi <strong>{displayName}</strong>!
-				</h1>
-				<Link href="https://docs.whop.com/apps" target="_blank">
-					<Button variant="classic" className="w-full" size="3">
-						Developer Docs
-					</Button>
-				</Link>
-			</div>
+  if (!hasAccess) {
+    return (
+      <div style={{ minHeight:"100vh", background:"#080c10", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"monospace", color:"#c8d4e0" }}>
+        <div style={{ textAlign:"center", maxWidth:380, padding:32 }}>
+          <div style={{ fontSize:28, marginBottom:12 }}>🔒</div>
+          <div style={{ color:"#ffd700", letterSpacing:2, fontSize:12, marginBottom:12 }}>INSTITUTIONAL SUITE REQUIRED</div>
+          <div style={{ color:"#4a7faa", fontSize:11, lineHeight:1.7 }}>
+            The TDL Trade Co-Pilot is exclusive to Institutional Suite subscribers. Upgrade your plan to unlock AI-powered trade analysis.
+          </div>
+          <a href="https://whop.com/trading-decisions-lab" style={{ display:"inline-block", marginTop:20, padding:"10px 24px", background:"#0ea5e915", border:"1px solid #0ea5e9", color:"#0ea5e9", textDecoration:"none", fontSize:11, letterSpacing:2, fontFamily:"monospace" }}>
+            UPGRADE NOW →
+          </a>
+        </div>
+      </div>
+    );
+  }
 
-			<p className="text-3 text-gray-10">
-				Welcome to you whop app! Replace this template with your own app. To
-				get you started, here's some helpful data you can fetch from whop.
-			</p>
-
-			<h3 className="text-6 font-bold">Experience data</h3>
-			<JsonViewer data={experience} />
-
-			<h3 className="text-6 font-bold">User data</h3>
-			<JsonViewer data={user} />
-
-			<h3 className="text-6 font-bold">Access data</h3>
-			<JsonViewer data={access} />
-		</div>
-	);
-}
-
-function JsonViewer({ data }: { data: any }) {
-	return (
-		<pre className="text-2 border border-gray-a4 rounded-lg p-4 bg-gray-a2 max-h-72 overflow-y-auto">
-			<code className="text-gray-10">{JSON.stringify(data, null, 2)}</code>
-		</pre>
-	);
+  return <CoPilotApp userId={userId} />;
 }
