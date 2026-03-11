@@ -1,7 +1,11 @@
-import { Whop } from "@whop/sdk";
+import { WhopApi, makeUserTokenVerifier } from "@whop/api";
 
-export const whopsdk = new Whop({
-	appID: process.env.NEXT_PUBLIC_WHOP_APP_ID,
-	apiKey: process.env.WHOP_API_KEY,
-	webhookKey: btoa(process.env.WHOP_WEBHOOK_SECRET || ""),
+export const whopApi = WhopApi({
+  appApiKey: process.env.WHOP_API_KEY ?? "fallback",
+  onBehalfOfUserId: process.env.WHOP_AGENT_USER_ID,
+});
+
+export const verifyUserToken = makeUserTokenVerifier({
+  appId: process.env.NEXT_PUBLIC_WHOP_APP_ID ?? "fallback",
+  dontThrow: true,
 });
