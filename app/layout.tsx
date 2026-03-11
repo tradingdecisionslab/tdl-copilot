@@ -1,35 +1,21 @@
-import { WhopApp } from "@whop/react/components";
+import { WhopApp } from "@whop/react";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-
-const geistSans = Geist({
-	variable: "--font-geist-sans",
-	subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-	variable: "--font-geist-mono",
-	subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
-	title: "Whop App",
-	description: "My Whop App",
+  title: "TDL Trade Co-Pilot",
+  description: "Institutional analysis engine for TDL subscribers",
 };
 
 export default function RootLayout({
-	children,
-}: Readonly<{
-	children: React.ReactNode;
-}>) {
-	return (
-		<html lang="en" suppressHydrationWarning>
-			<body
-				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-			>
-				<WhopApp>{children}</WhopApp>
-			</body>
-		</html>
-	);
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body style={{ margin: 0, padding: 0, background: "#080c10" }}>
+        <WhopApp>{children}</WhopApp>
+      </body>
+    </html>
+  );
 }
