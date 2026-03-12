@@ -10,7 +10,8 @@ export default async function ExperiencePage({
   const { experienceId } = await params;
   const headersList = await headers();
   const userToken = headersList.get("x-whop-user-token");
-  const userId = await verifyUserToken(userToken ?? "");
+  const payload = await verifyUserToken(userToken ?? "");
+  const userId = payload?.userId ?? null;
 
   if (!userId) {
     return (
