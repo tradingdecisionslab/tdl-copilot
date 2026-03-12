@@ -11,7 +11,7 @@
     "@google/generative-ai": "^0.21.0",
     "@whop/api": "latest",
     "@whop/react": "latest",
-    "next": "15.3.2",
+    "next": "15.4.0-canary.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },
