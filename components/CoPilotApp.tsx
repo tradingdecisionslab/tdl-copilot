@@ -222,6 +222,11 @@ export function CoPilotApp({ userId }: { userId: string }) {
           </div>
         </div>
 
+        {/* COMPLIANCE DISCLAIMER */}
+        <div style={{ background:"#0a0f14", border:"1px solid #1a2f45", borderLeft:"2px solid #ffd700", padding:"8px 12px", marginBottom:12, fontSize:9, color:"#6a7a60", lineHeight:1.6 }}>
+          ⚠ <span style={{ color:"#7a8a70", letterSpacing:0.5 }}>FOR EDUCATIONAL USE ONLY. This tool does not constitute financial advice, investment recommendations, or trading signals. Past performance is not indicative of future results. Trading futures and options involves substantial risk of loss. You are solely responsible for your trading decisions. Not affiliated with or endorsed by the CFTC, NFA, or any regulatory body.</span>
+        </div>
+
         {/* LIVE MARKET TICKER */}
         {quotes.length > 0 && (
           <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" as const }}>
@@ -454,6 +459,10 @@ export function CoPilotApp({ userId }: { userId: string }) {
                 {res.warnings!.map((w,i)=><div key={i} style={{ color:"#b89000", fontSize:11, padding:"2px 0" }}>· {w}</div>)}
               </div>
             )}
+
+            <div style={{ background:"#080c10", border:"1px solid #1a2f45", padding:"8px 12px", marginBottom:8, fontSize:9, color:"#3a4a35", lineHeight:1.6, textAlign:"center" }}>
+              This analysis is for educational purposes only and does not constitute financial or investment advice. Always conduct your own research and consult a qualified financial advisor before trading.
+            </div>
 
             <div style={S.panel}>
               <span style={S.seclbl}>ASK CO-PILOT</span>
