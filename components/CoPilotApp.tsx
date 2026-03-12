@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 const GC: Record<string, string[]> = {
   "A+": ["#00ff8815","#00ff88","#00ff88"],
@@ -19,23 +19,28 @@ const INDICATORS = [
   { id: "iea",   label: "IEA v8.5",             desc: "Regime, Edge Score, Diamond Signals" },
   { id: "awa",   label: "AWA",                   desc: "Demand/Supply Blocks, Volume" },
   { id: "wave",  label: "WaveOscPro",            desc: "RSI Candles, Squeeze, Momentum" },
-  { id: "exec",  label: "Trade Execution Suite", desc: "EXEC Score/Grade, FTC, Action" },
+  { id: "exec",  label: "Trade Execution Suite", desc: "EXEC Grade, FTC, Action" },
   { id: "form",  label: "Formation Scanner",     desc: "STRAT Formations: ABW/DBW/CFB etc" },
   { id: "lpz",   label: "LPZ",                   desc: "Liquidity Probability Zones" },
-  { id: "macro", label: "Macro Compass",         desc: "Macro Regime, Sector Flow" },
-  { id: "hma",   label: "HMA Concavity Pro",     desc: "HMA Slope, Concavity Signal" },
   { id: "delta", label: "Delta Flow Pro",         desc: "Volume Delta, Absorption, Imbalance" },
   { id: "mtf",   label: "MTF Reaction Zones",     desc: "Multi-TF Support/Resistance Zones" },
+  { id: "macro", label: "Macro Compass",         desc: "Macro Regime, Sector Flow" },
+  { id: "hma",   label: "HMA Concavity Pro",     desc: "HMA Slope, Concavity Signal" },
 ];
+
+type Quote = { label: string; price: number | null; change: number | null };
 
 type Result = {
   blocked?: boolean; msg?: string;
   ticker?: string; tf?: string; dir?: string;
   grade?: string; score?: number; verdict?: string;
+  pattern?: string | null;
   iea?: { regime: string; edge: string; signal: string } | null;
   awa?: { block: string; vol: string; quality: string } | null;
   wave?: { mom: string; squeeze: string } | null;
   exec?: { score: string; grade: string; ftc: string; action: string; formation: string } | null;
+  delta?: { direction: string; absorption: string; imbalance: string } | null;
+  mtf?: { zone: string; type: string; reaction: string } | null;
   checklist?: { item: string; met: boolean; note: string }[];
   levels?: { entry: string; stop: string; t1: string; t2: string; rr: string };
   narrative?: string;
@@ -54,6 +59,8 @@ export function CoPilotApp({ userId }: { userId: string }) {
   const [fa, setFa] = useState<string | null>(null);
   const [fb, setFb] = useState(false);
   const [activeInds, setActiveInds] = useState<Set<string>>(new Set(["iea","awa","wave"]));
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quotesTs, setQuotesTs] = useState<string>("");
   const [man, setMan] = useState({
     ticker:"", tf:"15m", dir:"LONG", regime:"TREND",
     edge:"", sig:"Long Diamond", block:"Demand", vol:"Loud",
@@ -61,6 +68,37 @@ export function CoPilotApp({ userId }: { userId: string }) {
     exScore:"", exGrade:"A", ftc:"", action:"Go", form:"None", notes:""
   });
   const fileRef = useRef<HTMLInputElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+
+  // Fetch live quotes on mount
+  useEffect(() => {
+    fetch("/api/prices")
+      .then(r => r.json())
+      .then(d => {
+        if (d.quotes?.length) {
+          setQuotes(d.quotes);
+          setQuotesTs(new Date(d.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Paste support
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) loadFile(file);
+          break;
+        }
+      }
+    };
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, []);
 
   const toggleInd = (id: string) => {
     setActiveInds(prev => {
@@ -72,6 +110,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
 
   const loadFile = (f: File | null | undefined) => {
     if (!f?.type.startsWith("image/")) return;
+    setTab("upload");
     const reader = new FileReader();
     reader.onload = e => {
       const result = e.target?.result as string;
@@ -87,13 +126,24 @@ export function CoPilotApp({ userId }: { userId: string }) {
     loadFile(e.dataTransfer.files[0]);
   }, []);
 
+  const buildMarketContext = () => {
+    if (!quotes.length) return undefined;
+    const parts = quotes.map(q => {
+      if (!q.price) return q.label + ": N/A";
+      const chStr = q.change !== null ? (q.change >= 0 ? "+" : "") + q.change.toFixed(2) + "%" : "";
+      return q.label + ": " + q.price.toFixed(2) + " (" + chStr + ")";
+    });
+    return "Live market snapshot (" + quotesTs + "): " + parts.join(", ");
+  };
+
   const analyze = async () => {
     setBusy(true); setErr(null); setRes(null); setFa(null);
     try {
       const indicators = Array.from(activeInds);
+      const marketContext = buildMarketContext();
       const body = tab === "upload" && b64
-        ? { type: "image", imageB64: b64, activeIndicators: indicators }
-        : { type: "manual", activeIndicators: indicators, manualText: `TDL Manual Input — Ticker:${man.ticker||"N/A"} TF:${man.tf} Direction:${man.dir} IEA Regime:${man.regime} Edge Score:${man.edge||"N/A"} Signal:${man.sig} AWA Block:${man.block} Volume:${man.vol} Quality:${man.qual} Wave Momentum:${man.mom} Squeeze:${man.sqz} EXEC Score:${man.exScore||"N/A"} Grade:${man.exGrade} FTC:${man.ftc||"N/A"} Action:${man.action} Formation:${man.form} Notes:${man.notes||"none"}` };
+        ? { type: "image", imageB64: b64, activeIndicators: indicators, marketContext }
+        : { type: "manual", activeIndicators: indicators, marketContext, manualText: `TDL Manual Input — Ticker:${man.ticker||"N/A"} TF:${man.tf} Direction:${man.dir} IEA Regime:${man.regime} Edge Score:${man.edge||"N/A"} Signal:${man.sig} AWA Block:${man.block} Volume:${man.vol} Quality:${man.qual} Wave Momentum:${man.mom} Squeeze:${man.sqz} EXEC Score:${man.exScore||"N/A"} Grade:${man.exGrade} FTC:${man.ftc||"N/A"} Action:${man.action} Formation:${man.form} Notes:${man.notes||"none"}` };
 
       const r = await fetch("/api/analyze", {
         method: "POST",
@@ -162,13 +212,35 @@ export function CoPilotApp({ userId }: { userId: string }) {
       `}</style>
 
       <div style={{ maxWidth:720, margin:"0 auto", padding:"16px 12px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, paddingBottom:10, borderBottom:"1px solid #1a2f45" }}>
+
+        {/* HEADER */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, paddingBottom:10, borderBottom:"1px solid #1a2f45" }}>
           <div style={{ width:28, height:28, background:"#0ea5e915", border:"1px solid #0ea5e9", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>◈</div>
           <div>
             <div style={{ color:"#0ea5e9", fontSize:13, letterSpacing:3, fontWeight:"bold" }}>TDL TRADE CO-PILOT</div>
             <div style={{ color:"#1a4060", fontSize:9, letterSpacing:1 }}>INSTITUTIONAL SUITE · {userId.slice(0,12).toUpperCase()}</div>
           </div>
         </div>
+
+        {/* LIVE MARKET TICKER */}
+        {quotes.length > 0 && (
+          <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" as const }}>
+            {quotes.map(q => {
+              const up = (q.change ?? 0) >= 0;
+              const col = q.change === null ? "#2a5a7f" : up ? "#00ff88" : "#ff4444";
+              return (
+                <div key={q.label} style={{ background:"#0d1117", border:"1px solid #1a2f45", padding:"5px 10px", borderRadius:2, display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ color:"#2a5a7f", fontSize:9, letterSpacing:1 }}>{q.label}</span>
+                  <span style={{ color:"#c8d4e0", fontSize:11, fontWeight:"bold" }}>{q.price ? q.price.toFixed(2) : "—"}</span>
+                  {q.change !== null && (
+                    <span style={{ color:col, fontSize:9 }}>{up ? "▲" : "▼"} {Math.abs(q.change).toFixed(2)}%</span>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ color:"#1a3a50", fontSize:9, alignSelf:"center", marginLeft:4 }}>as of {quotesTs} · included in analysis</div>
+          </div>
+        )}
 
         {/* INDICATOR SELECTOR */}
         <div style={{ ...S.panel, marginBottom:12 }}>
@@ -203,17 +275,22 @@ export function CoPilotApp({ userId }: { userId: string }) {
         </div>
 
         {tab === "upload" && (
-          <div className="dz" onDrop={onDrop} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onClick={()=>fileRef.current?.click()}
-            style={{ border:`1px dashed ${drag?"#0ea5e9":"#1a2f45"}`, padding:"22px", textAlign:"center", cursor:"pointer", marginBottom:10, background:drag?"#0ea5e905":"#060a0f", transition:"all .2s", borderRadius:2 }}>
-            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>loadFile(e.target.files?.[0])}/>
-            {img ? <img src={img} alt="chart" style={{ maxWidth:"100%", maxHeight:220, objectFit:"contain", borderRadius:2 }}/> : (
-              <>
-                <div style={{ fontSize:24, marginBottom:8, color:"#1a3a50" }}>📊</div>
-                <div style={{ color:"#0ea5e9", fontSize:10, letterSpacing:2, marginBottom:4 }}>DROP CHART SCREENSHOT</div>
-                <div style={{ color:"#1a4060", fontSize:9 }}>or click to browse · PNG / JPG</div>
-              </>
-            )}
-          </div>
+          <>
+            <div ref={dropRef} className="dz" onDrop={onDrop} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onClick={()=>fileRef.current?.click()}
+              style={{ border:`1px dashed ${drag?"#0ea5e9":"#1a2f45"}`, padding:"22px", textAlign:"center", cursor:"pointer", marginBottom:6, background:drag?"#0ea5e905":"#060a0f", transition:"all .2s", borderRadius:2 }}>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>loadFile(e.target.files?.[0])}/>
+              {img ? <img src={img} alt="chart" style={{ maxWidth:"100%", maxHeight:220, objectFit:"contain", borderRadius:2 }}/> : (
+                <>
+                  <div style={{ fontSize:24, marginBottom:8, color:"#1a3a50" }}>📊</div>
+                  <div style={{ color:"#0ea5e9", fontSize:10, letterSpacing:2, marginBottom:4 }}>DROP CHART SCREENSHOT</div>
+                  <div style={{ color:"#1a4060", fontSize:9 }}>or click to browse · PNG / JPG</div>
+                </>
+              )}
+            </div>
+            <div style={{ color:"#1a4060", fontSize:9, textAlign:"center", marginBottom:10 }}>
+              💡 You can also <span style={{ color:"#0ea5e9" }}>Ctrl+V / Cmd+V</span> to paste a screenshot directly
+            </div>
+          </>
         )}
 
         {tab === "manual" && (
@@ -282,7 +359,11 @@ export function CoPilotApp({ userId }: { userId: string }) {
             </div>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
-              <div style={S.panel}><span style={S.lbl}>INSTRUMENT</span><div style={{ fontFamily:"Georgia,serif", fontSize:16, letterSpacing:2, fontWeight:"bold" }}>{res.ticker} <span style={{ fontSize:11, color:"#2a5a7f", fontWeight:"normal" }}>{res.tf}</span></div></div>
+              <div style={S.panel}>
+                <span style={S.lbl}>INSTRUMENT</span>
+                <div style={{ fontFamily:"Georgia,serif", fontSize:16, letterSpacing:2, fontWeight:"bold" }}>{res.ticker} <span style={{ fontSize:11, color:"#2a5a7f", fontWeight:"normal" }}>{res.tf}</span></div>
+                {res.pattern && <div style={{ color:"#ffd700", fontSize:10, marginTop:5, letterSpacing:1 }}>◆ {res.pattern}</div>}
+              </div>
               <div style={S.panel}>
                 <span style={S.lbl}>CONFLUENCE {res.score}/10</span>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
@@ -323,6 +404,20 @@ export function CoPilotApp({ userId }: { userId: string }) {
                   ))}
                 </div>
               )}
+              {activeInds.has("delta") && res.delta && (
+                <div style={S.panel}><span style={S.seclbl}>DELTA FLOW PRO</span>
+                  {[["DIRECTION",res.delta.direction],["ABSORPTION",res.delta.absorption],["IMBALANCE",res.delta.imbalance]].map(([k,val])=>(
+                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                  ))}
+                </div>
+              )}
+              {activeInds.has("mtf") && res.mtf && (
+                <div style={S.panel}><span style={S.seclbl}>MTF REACTION ZONES</span>
+                  {[["ZONE",res.mtf.zone],["TYPE",res.mtf.type],["REACTION",res.mtf.reaction]].map(([k,val])=>(
+                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ ...S.panel, marginBottom:8 }}>
@@ -337,11 +432,12 @@ export function CoPilotApp({ userId }: { userId: string }) {
 
             <div style={{ ...S.panel, marginBottom:8 }}>
               <span style={S.seclbl}>KEY LEVELS</span>
+              <div style={{ color:"#1a3a50", fontSize:9, marginBottom:8 }}>⚠ Image analysis: levels are approximate zones — confirm exact prices on your chart</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6 }}>
                 {([["ENTRY",res.levels?.entry,"#ffd700"],["STOP",res.levels?.stop,"#ff4444"],["TARGET 1",res.levels?.t1,"#00ff88"],["TARGET 2",res.levels?.t2,"#00cc66"],["R:R",res.levels?.rr,"#0ea5e9"]] as [string,string|undefined,string][]).map(([l,val,c])=>(
                   <div key={l} style={{ background:"#060a0f", padding:"7px 4px", textAlign:"center", borderRadius:2 }}>
                     <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:3 }}>{l}</div>
-                    <div style={{ color:val&&val!=="null"?c:"#1a3a50", fontSize:11 }}>{val&&val!=="null"?val:"—"}</div>
+                    <div style={{ color:val&&val!=="null"?c:"#1a3a50", fontSize:10 }}>{val&&val!=="null"?val:"—"}</div>
                   </div>
                 ))}
               </div>
@@ -367,7 +463,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
                   {fb?"...":"SEND →"}
                 </button>
               </div>
-              {fa && <div style={{ marginTop:9, padding:11, background:"#060a0f", borderLeft:"2px solid #0ea5e9", color:"#c8d4e0", lineHeight:1.7, fontSize:12, whiteSpace:"pre-wrap" }}>{fa.replace(/\*\*(.*?)\*\*/g,"$1").replace(/##\s*/g,"").replace(/\*/g,"")}</div>}
+              {fa && <div style={{ marginTop:9, padding:11, background:"#060a0f", borderLeft:"2px solid #0ea5e9", color:"#c8d4e0", lineHeight:1.7, fontSize:12, whiteSpace:"pre-wrap" }}>{fa}</div>}
             </div>
           </div>
         )}
