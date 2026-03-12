@@ -10,7 +10,7 @@ To run this project:
 	- Ensure the "Base URL" is set to the domain you intend to deploy the site on.
 	- Ensure the "App path" is set to `/experiences/[experienceId]`
 	- Ensure the "Dashboard path" is set to `/dashboard/[companyId]`
-	- Ensure the "Discover path" is set to `/discover`
+	- Ensure the "Discover path" is set to `/discover` 
 
 3. Copy the environment variables from the `.env.development` into a `.env.local`. Ensure to use real values from the whop dashboard.
 
