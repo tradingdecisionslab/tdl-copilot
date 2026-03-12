@@ -1,5 +1,20 @@
 import { makeUserTokenVerifier } from "@whop/api";
 
+const _verify = makeUserTokenVerifier({
+  appId: process.env.NEXT_PUBLIC_WHOP_APP_ID ?? "fallback",
+  dontThrow: true,
+});
+
+export async function verifyUserToken(token: string): Promise<string | null> {
+  try {
+    const payload = await _verify(token);
+    if (!payload) return null;
+    return typeof payload === "string" ? payload : (payload as any).userId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const whopApi = {
   CheckIfUserHasAccessToExperience: async ({
     userId,
@@ -23,8 +38,3 @@ export const whopApi = {
     return { hasAccessToExperience: data.has_access ?? false };
   },
 };
-
-export const verifyUserToken = makeUserTokenVerifier({
-  appId: process.env.NEXT_PUBLIC_WHOP_APP_ID ?? "fallback",
-  dontThrow: true,
-});
