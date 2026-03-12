@@ -24,10 +24,13 @@ export default async function ExperiencePage({
     );
   }
 
-  const hasAccess = await whopApi
-    .CheckIfUserHasAccessToExperience({ userId, experienceId })
-    .then((r) => r.hasAccessToExperience)
-    .catch(() => false);
+  let hasAccess = false;
+  try {
+    const result = await whopApi.CheckIfUserHasAccessToExperience({ userId, experienceId });
+    hasAccess = result.hasAccessToExperience ?? false;
+  } catch {
+    hasAccess = false;
+  }
 
   if (!hasAccess) {
     return (
