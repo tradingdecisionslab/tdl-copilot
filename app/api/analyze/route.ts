@@ -8,12 +8,16 @@ function buildSystemPrompt(active: string[]): string {
   const hasAwa = active.includes("awa");
   const hasWave = active.includes("wave");
   const hasExec = active.includes("exec");
+  const hasDelta = active.includes("delta");
+  const hasMtf = active.includes("mtf");
 
   const checklistItems: string[] = [];
   if (hasIea) checklistItems.push("IEA Regime Aligned", "Edge Score 7+", "IEA Signal Diamond");
   if (hasAwa) checklistItems.push("AWA Block Present", "AWA Volume Loud");
   if (hasWave) checklistItems.push("WaveOsc Momentum Aligned", "Squeeze Clear");
   if (hasExec) checklistItems.push("EXEC Grade A/A+", "FTC 3/4+", "Formation Non-Conflicting");
+  if (hasDelta) checklistItems.push("Delta Flow Aligned", "No Absorption Against Trade");
+  if (hasMtf) checklistItems.push("Price At MTF Zone");
 
   const activeList = active.map((s) => s.toUpperCase()).join(", ") || "NONE";
 
@@ -22,6 +26,8 @@ function buildSystemPrompt(active: string[]): string {
   if (hasAwa) guides.push("- AWA: Colored rectangular zones on chart labeled Demand (green) or Supply (red) with volume text (Loud/High/Soft) and quality state (Untested/Retested/Broken).");
   if (hasWave) guides.push("- WaveOscPro: Oscillator panel at bottom with RSI-style candles (bullish=above midline/green, bearish=below/red) and squeeze dots (colored=active, grey=released/none).");
   if (hasExec) guides.push("- Trade Execution Suite: EXEC panel with a LETTER GRADE (A+/A/B/C — NOT a percentage), FTC counter (e.g. 3/4 BULL), and ACTION label (Go/Wait/No Trade). IMPORTANT: Any percentages on chart belong to LPZ — do NOT assign them to EXEC.");
+  if (hasDelta) guides.push("- Delta Flow Pro: Volume delta bars or histogram showing buying vs selling pressure. Positive delta=buying pressure, negative=selling. Look for absorption signals and imbalance labels.");
+  if (hasMtf) guides.push("- MTF Reaction Zones: Horizontal zones from higher timeframes on the current chart. Labeled boxes/lines indicating HTF support or resistance levels.");
 
   const schema = JSON.stringify({
     blocked: false,
@@ -35,6 +41,8 @@ function buildSystemPrompt(active: string[]): string {
     awa: hasAwa ? { block: "string|null", vol: "string|null", quality: "string|null" } : null,
     wave: hasWave ? { mom: "string|null", squeeze: "string|null" } : null,
     exec: hasExec ? { score: "string|null", grade: "string|null", ftc: "string|null", action: "string|null", formation: "string|null" } : null,
+    delta: hasDelta ? { direction: "string|null", absorption: "string|null", imbalance: "string|null" } : null,
+    mtf: hasMtf ? { zone: "string|null", type: "Support|Resistance|null", reaction: "string|null" } : null,
     checklist: [{ item: "string", met: true, note: "string" }],
     levels: { entry: "string", stop: "string", t1: "string", t2: "string", rr: "string" },
     narrative: "string",
