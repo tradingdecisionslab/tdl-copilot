@@ -8,7 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@anthropic-ai/sdk": "^0.39.0",
     "@whop/api": "latest",
     "@whop/react": "latest",
     "next": "15.1.9",
