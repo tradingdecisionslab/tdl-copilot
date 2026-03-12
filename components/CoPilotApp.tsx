@@ -24,6 +24,8 @@ const INDICATORS = [
   { id: "lpz",   label: "LPZ",                   desc: "Liquidity Probability Zones" },
   { id: "macro", label: "Macro Compass",         desc: "Macro Regime, Sector Flow" },
   { id: "hma",   label: "HMA Concavity Pro",     desc: "HMA Slope, Concavity Signal" },
+  { id: "delta", label: "Delta Flow Pro",         desc: "Volume Delta, Absorption, Imbalance" },
+  { id: "mtf",   label: "MTF Reaction Zones",     desc: "Multi-TF Support/Resistance Zones" },
 ];
 
 type Result = {
