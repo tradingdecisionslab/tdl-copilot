@@ -9,59 +9,76 @@ function buildSystemPrompt(active: string[]): string {
   const hasWave = active.includes("wave");
   const hasExec = active.includes("exec");
 
-  const ieaSchema = hasIea
-    ? '{"regime":"string|null","edge":"string|null","signal":"string|null"}'
-    : "null";
-  const awaSchema = hasAwa
-    ? '{"block":"string|null","vol":"string|null","quality":"string|null"}'
-    : "null";
-  const waveSchema = hasWave
-    ? '{"mom":"string|null","squeeze":"string|null"}'
-    : "null";
-  const execSchema = hasExec
-    ? '{"score":"string|null","grade":"string|null","ftc":"string|null","action":"string|null","formation":"string|null"}'
-    : "null";
-
   const checklistItems: string[] = [];
   if (hasIea) checklistItems.push("IEA Regime Aligned", "Edge Score 7+", "IEA Signal Diamond");
   if (hasAwa) checklistItems.push("AWA Block Present", "AWA Volume Loud");
   if (hasWave) checklistItems.push("WaveOsc Momentum Aligned", "Squeeze Clear");
-  if (hasExec) checklistItems.push("EXEC 80+", "FTC 3/4+", "Formation Non-Conflicting");
+  if (hasExec) checklistItems.push("EXEC Grade A/A+", "FTC 3/4+", "Formation Non-Conflicting");
 
-  const jsonSchema = `{"blocked":false,"ticker":"string","tf":"string","dir":"LONG|SHORT|NEUTRAL","grade":"A+|A|B|C|NO TRADE","score":0,"verdict":"GO|WAIT|NO TRADE","iea":${ieaSchema},"awa":${awaSchema},"wave":${waveSchema},"exec":${execSchema},"checklist":[{"item":"string","met":true,"note":"string"}],"levels":{"entry":"string","stop":"string","t1":"string","t2":"string","rr":"string"},"narrative":"string","warnings":["string"]}`;
+  const activeList = active.map((s) => s.toUpperCase()).join(", ") || "NONE";
 
-  const activeList = active.join(", ").toUpperCase() || "NONE SPECIFIED";
+  const guides: string[] = [];
+  if (hasIea) guides.push("- IEA v8.5: Panel labeled 'Inst Edge' showing REGIME (TREND/RANGE/BREAKOUT/MIXED as text label), EDGE SCORE (numeric 0-10+, may show session like NY EXT/LONDON/ASIA), and diamond BULL/BEAR signal labels on candles.");
+  if (hasAwa) guides.push("- AWA: Colored rectangular zones on chart labeled Demand (green) or Supply (red) with volume text (Loud/High/Soft) and quality state (Untested/Retested/Broken).");
+  if (hasWave) guides.push("- WaveOscPro: Oscillator panel at bottom with RSI-style candles (bullish=above midline/green, bearish=below/red) and squeeze dots (colored=active, grey=released/none).");
+  if (hasExec) guides.push("- Trade Execution Suite: EXEC panel with a LETTER GRADE (A+/A/B/C — NOT a percentage), FTC counter (e.g. 3/4 BULL), and ACTION label (Go/Wait/No Trade). IMPORTANT: Any percentages on chart belong to LPZ — do NOT assign them to EXEC.");
 
-  return `You are the TDL Trade Co-Pilot. The user has the following TDL indicators active on their chart: ${activeList}.
+  const schema = JSON.stringify({
+    blocked: false,
+    ticker: "string",
+    tf: "string",
+    dir: "LONG|SHORT|NEUTRAL",
+    grade: "A+|A|B|C|NO TRADE",
+    score: 0,
+    verdict: "GO|WAIT|NO TRADE",
+    iea: hasIea ? { regime: "string|null", edge: "string|null", signal: "string|null" } : null,
+    awa: hasAwa ? { block: "string|null", vol: "string|null", quality: "string|null" } : null,
+    wave: hasWave ? { mom: "string|null", squeeze: "string|null" } : null,
+    exec: hasExec ? { score: "string|null", grade: "string|null", ftc: "string|null", action: "string|null", formation: "string|null" } : null,
+    checklist: [{ item: "string", met: true, note: "string" }],
+    levels: { entry: "string", stop: "string", t1: "string", t2: "string", rr: "string" },
+    narrative: "string",
+    warnings: ["string"],
+  });
 
-CRITICAL: Only analyze and score indicators the user has marked as active. Do NOT infer, guess, or hallucinate values for indicators not in the active list. Return null for any inactive indicator field.
+  const lines = [
+    "You are the TDL Trade Co-Pilot, an elite institutional trade analysis engine for Trading Decisions Lab subscribers.",
+    "",
+    "The user has confirmed these TDL indicators are active on their chart: " + activeList + ".",
+    "",
+    "CRITICAL RULES:",
+    "1. Only analyze indicators the user has marked active. Return null for all inactive indicator fields.",
+    "2. Never guess, infer, or hallucinate values. If you cannot clearly read a value, return null.",
+    "3. Do not assign values from one indicator to another (LPZ percentages are NOT EXEC scores).",
+    "",
+    "VISUAL IDENTIFICATION GUIDE:",
+    ...guides,
+    "",
+    "For image uploads: verify at least one active TDL indicator is visible. If none found return:",
+    "{\"blocked\":true,\"msg\":\"TDL indicators not detected. Ensure your selected indicators are active and visible on your chart.\"}",
+    "",
+    "Return ONLY valid JSON, no markdown:",
+    schema,
+    "",
+    "Checklist items (active indicators only): " + checklistItems.join(", ") + ".",
+    "Score 0-10: 8-10=A+, 6-7=A, 4-5=B, 2-3=C, 0-1=NO TRADE.",
+  ];
 
-VISUAL IDENTIFICATION GUIDE (only for active indicators):
-- IEA v8.5: Look for a panel labeled "Inst Edge" with Regime (TREND/RANGE/BREAKOUT/MIXED), and diamond-shaped BULL/BEAR signal labels on candles.
-- AWA: Look for colored demand/supply order blocks on the chart with volume labels (Loud/High/Soft).
-- WaveOscPro: Look for an oscillator panel at bottom with colored RSI-style candles and squeeze dots.
-- Trade Execution Suite: Look for EXEC panel with a letter grade (A+/A/B/C), FTC counter (e.g. 3/4), and ACTION label. NOTE: EXEC grade is a LETTER not a percentage. Ignore any percentage values on chart — those belong to LPZ (Liquidity Probability Zones), not EXEC.
-
-For image uploads: verify at least one active TDL indicator signature is visible. If none found return: {"blocked":true,"msg":"TDL indicators not detected. Ensure your selected indicators are active and visible on your chart."}
-
-Return ONLY valid JSON, no markdown:
-${jsonSchema}
-
-Evaluate checklist only for active indicators: ${checklistItems.join(", ")}. Score 0-10: 8-10=A+, 6-7=A, 4-5=B, 2-3=C, 0-1=NO TRADE.`;
+  return lines.join("\n");
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { type, imageB64, manualText, followUp, priorResult, activeIndicators } = body;
-  const active: string[] = activeIndicators ?? ["iea", "awa", "wave", "exec"];
+  const active: string[] = activeIndicators ?? ["iea", "awa", "wave"];
 
   try {
     if (followUp && priorResult) {
       const response = await client.messages.create({
         model: "claude-sonnet-4-5",
         max_tokens: 1000,
-        system: "You are the TDL Trade Co-Pilot. Answer follow-up trading questions concisely based on prior analysis. Be direct and institutional. No disclaimers. Format your response in plain text only, no markdown, no asterisks, no headers.",
-        messages: [{ role: "user", content: `Prior analysis: ${JSON.stringify(priorResult)}\n\nQuestion: ${followUp}` }],
+        system: "You are the TDL Trade Co-Pilot. Answer follow-up trading questions concisely based on prior analysis. Be direct and institutional. Plain text only — no markdown, no asterisks, no bold, no headers.",
+        messages: [{ role: "user", content: "Prior analysis: " + JSON.stringify(priorResult) + "\n\nQuestion: " + followUp }],
       });
       const text = response.content.find((b) => b.type === "text")?.text ?? "";
       return NextResponse.json({ answer: text });
@@ -75,7 +92,7 @@ export async function POST(req: NextRequest) {
         { type: "text", text: "Analyze this TradingView chart with TDL indicators. Return JSON only." },
       ];
     } else {
-      content = `${manualText}\n\nReturn JSON only.`;
+      content = manualText + "\n\nReturn JSON only.";
     }
 
     const response = await client.messages.create({
