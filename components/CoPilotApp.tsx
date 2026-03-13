@@ -222,9 +222,12 @@ export function CoPilotApp({ userId }: { userId: string }) {
   };
 
   const scoreColor = (s: number) => s >= 8 ? "#00ff88" : s >= 6 ? "#7fff00" : s >= 4 ? "#ffd700" : "#ff4444";
-  const sizeNote = (s: number, warnings: string[] = []) => {
+  const sizeNote = (s: number, verdict: string, warnings: string[] = []) => {
+    if (verdict === "WAIT") return { label: "CONDITIONAL · WAIT FOR TRIGGER", color: "#ffd700" };
+    if (verdict === "NO TRADE") return { label: "NO TRADE / SIT OUT", color: "#ff4444" };
     if (s >= 8 && warnings.length === 0) return { label: "FULL SIZE", color: "#00ff88" };
     if (s >= 6) return { label: "HALF SIZE", color: "#ffd700" };
+    if (s >= 4) return { label: "QUARTER SIZE · TRIGGER ONLY", color: "#ff8c00" };
     return { label: "NO TRADE / SIT OUT", color: "#ff4444" };
   };
 
@@ -412,7 +415,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
 
         {res && !res.blocked && g && v && dc && (() => {
           const displayScore = getDisplayScore(res);
-          const size = sizeNote(displayScore, res.warnings);
+          const size = sizeNote(displayScore, res.verdict || 'NO TRADE', res.warnings);
           const isNoTrade = res.verdict === "NO TRADE";
 
           return (
@@ -628,7 +631,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
                 <div style={{ display:"flex", gap:5, flexWrap:"wrap" as const, marginBottom:fa?10:0 }}>
                   {([
                     res.ticker?.toUpperCase().includes("NQ") ? "Max loss on 2 NQ contracts at this stop?" : null,
-                    res.verdict === "WAIT" ? "What does this look like if trigger fires at 3pm?" : null,
+                    res.verdict === "WAIT" ? (["D","W","1W"].includes(man.tf) ? "What does this look like if trigger fires next week?" : "What does this look like if trigger fires at 3pm?") : null,
                     "What would strengthen this setup to an A+?",
                     (res.warnings?.length ?? 0) > 0 ? "How do these warnings affect position size?" : "What are the key risk factors here?",
                   ] as (string|null)[]).filter(Boolean).slice(0,3).map((q,i)=>(
