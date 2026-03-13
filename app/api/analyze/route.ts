@@ -51,7 +51,7 @@ function buildSystemPrompt(active: string[], marketContext?: string, currentPric
   const activeList = active.map((s) => s.toUpperCase()).join(", ") || "NONE";
 
   const guides: string[] = [];
-  if (hasIea) guides.push("- IEA v8.5: Panel labeled 'Inst Edge' showing REGIME (TREND/RANGE/BREAKOUT/MIXED as text label), EDGE SCORE (numeric 0-10+, may show session like NY EXT/LONDON/ASIA), and diamond BULL/BEAR signal labels on candles.");
+  if (hasIea) guides.push("- IEA v8.5: Panel labeled 'Inst Edge' with rows for REGIME (TREND/RANGE/BREAKOUT/MIXED), EDGE SCORE (a NUMERIC value only, e.g. 7.2, 8.5 — do NOT report the session label NY EXT/LONDON/ASIA as the edge score, these are separate adjacent rows), and diamond BULL/BEAR signal labels on candles. If you cannot read a clear numeric edge score, return null for that field.");
   if (hasAwa) guides.push("- AWA: Colored rectangular zones on chart labeled Demand (green) or Supply (red) with volume text (Loud/High/Soft) and quality state (Untested/Retested/Broken). Must see 'AWA', 'Demand', or 'Supply' text label on zone — colored candles alone are NOT AWA blocks.");
   if (hasWave) guides.push("- WaveOscPro: Oscillator panel at bottom with RSI-style candles (bullish=above midline/green, bearish=below/red) and squeeze dots (colored=active, grey=released/none).");
   if (hasExec) guides.push("- Trade Execution Suite: EXEC panel with a LETTER GRADE (A+/A/B/C — NOT a percentage), FTC counter (e.g. 3/4 BULL), and ACTION label (Go/Wait/No Trade). Any percentages on chart belong to LPZ — do NOT assign them to EXEC.");
@@ -78,7 +78,7 @@ function buildSystemPrompt(active: string[], marketContext?: string, currentPric
     blocked: false,
     ticker: "string",
     tf: "string",
-    dir: "LONG|SHORT|NEUTRAL",
+    dir: "LONG|SHORT|NEUTRAL — if NEUTRAL, entry/stop/t1/t2 must be null. Do not provide dual long+short scenarios in the levels fields. If direction is genuinely unclear, use NEUTRAL and leave levels null.",
     grade: "A+|A|B|C|NO TRADE",
     score: 0,
     verdict: "GO|WAIT|NO TRADE",
@@ -129,11 +129,13 @@ function buildSystemPrompt(active: string[], marketContext?: string, currentPric
     "5. Do not cross-assign values between indicators. LPZ percentages are NOT EXEC scores. AWA zones require the text label 'Demand' or 'Supply' — colored candles alone are not AWA.",
     "6. Plain charts with no TDL indicators: analyze price action and technicals only. Return null for all indicator fields. This is valid — do not force indicator readings.",
     "7. SCORE DISCIPLINE: Count how many active indicators returned non-null values. If fewer than 2 active indicators have readable data, cap your score at 4 regardless of other factors.",
+    "8. DIRECTION DISCIPLINE: Direction must reflect the weight of evidence. If IEA Order Flow is BEARISH and Delta Flow is BEARISH, direction must be SHORT or NEUTRAL — not LONG, even if an AWA demand block is present. A single demand block does not override two bearish directional reads. Only mark LONG if the majority of readable directional signals support it.",
     "",
     "CONFIDENCE SCORING (required for each active indicator):",
     "- high: indicator panel clearly visible, values unambiguously readable",
     "- medium: panel visible but some values partially obscured or uncertain",
     "- low: panel barely visible or values unclear — report what you can but flag uncertainty",
+    "- IMPORTANT: If any core field of an active indicator is null (cannot be read), confidence CANNOT be high. A partially readable panel = medium at best.",
     "",
     "ENTRY TRIGGER (required when verdict is WAIT):",
     "Provide a specific, actionable condition that would change the verdict to GO. Example: 'First 5min candle close above 24,790 with WaveOsc turning bullish' or 'AWA demand block holds on retest with engulfing candle'. Be precise — not generic.",
