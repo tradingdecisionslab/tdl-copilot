@@ -29,18 +29,28 @@ const INDICATORS = [
 ];
 
 type Quote = { label: string; price: number | null; change: number | null };
+type ConfidenceLevel = "high" | "medium" | "low";
 
 type Result = {
   blocked?: boolean; msg?: string;
   ticker?: string; tf?: string; dir?: string;
   grade?: string; score?: number; verdict?: string;
   pattern?: string | null;
-  iea?: { regime: string; edge: string; signal: string } | null;
-  awa?: { block: string; vol: string; quality: string } | null;
-  wave?: { mom: string; squeeze: string } | null;
-  exec?: { score: string; grade: string; ftc: string; action: string; formation: string } | null;
-  delta?: { direction: string; absorption: string; imbalance: string } | null;
-  mtf?: { zone: string; type: string; reaction: string } | null;
+  entry_trigger?: string | null;
+  invalidation?: string | null;
+  technicals?: {
+    candle?: string | null;
+    structure?: string | null;
+    key_levels?: string[];
+    range_position?: string | null;
+    momentum?: string | null;
+  } | null;
+  iea?: { regime: string; edge: string; signal: string; confidence: ConfidenceLevel } | null;
+  awa?: { block: string; vol: string; quality: string; confidence: ConfidenceLevel } | null;
+  wave?: { mom: string; squeeze: string; confidence: ConfidenceLevel } | null;
+  exec?: { score: string; grade: string; ftc: string; action: string; formation: string; confidence: ConfidenceLevel } | null;
+  delta?: { direction: string; absorption: string; imbalance: string; confidence: ConfidenceLevel } | null;
+  mtf?: { zone: string; type: string; reaction: string; confidence: ConfidenceLevel } | null;
   checklist?: { item: string; met: boolean; note: string }[];
   levels?: { entry: string; stop: string; t1: string; t2: string; rr: string };
   narrative?: string;
@@ -59,6 +69,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
   const [fa, setFa] = useState<string | null>(null);
   const [fb, setFb] = useState(false);
   const [activeInds, setActiveInds] = useState<Set<string>>(new Set(["iea","awa","wave"]));
+  const [currentPrice, setCurrentPrice] = useState("");
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [quotesTs, setQuotesTs] = useState<string>("");
   const [man, setMan] = useState({
@@ -70,7 +81,6 @@ export function CoPilotApp({ userId }: { userId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
 
-  // Fetch live quotes on mount
   useEffect(() => {
     fetch("/api/prices")
       .then(r => r.json())
@@ -83,7 +93,6 @@ export function CoPilotApp({ userId }: { userId: string }) {
       .catch(() => {});
   }, []);
 
-  // Paste support
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
@@ -136,14 +145,25 @@ export function CoPilotApp({ userId }: { userId: string }) {
     return "Live market snapshot (" + quotesTs + "): " + parts.join(", ");
   };
 
+  // Client-side score cap: if <2 active indicators returned non-null, cap at 4
+  const getDisplayScore = (r: Result): number => {
+    if (!r.score) return 0;
+    const activeArr = Array.from(activeInds);
+    const indMap: Record<string, unknown> = { iea: r.iea, awa: r.awa, wave: r.wave, exec: r.exec, delta: r.delta, mtf: r.mtf };
+    const readableCount = activeArr.filter(id => indMap[id] != null).length;
+    if (readableCount < 2 && activeArr.length >= 2) return Math.min(r.score, 4);
+    return r.score;
+  };
+
   const analyze = async () => {
     setBusy(true); setErr(null); setRes(null); setFa(null);
     try {
       const indicators = Array.from(activeInds);
       const marketContext = buildMarketContext();
+      const priceAnchor = currentPrice.trim() || undefined;
       const body = tab === "upload" && b64
-        ? { type: "image", imageB64: b64, activeIndicators: indicators, marketContext }
-        : { type: "manual", activeIndicators: indicators, marketContext, manualText: `TDL Manual Input — Ticker:${man.ticker||"N/A"} TF:${man.tf} Direction:${man.dir} IEA Regime:${man.regime} Edge Score:${man.edge||"N/A"} Signal:${man.sig} AWA Block:${man.block} Volume:${man.vol} Quality:${man.qual} Wave Momentum:${man.mom} Squeeze:${man.sqz} EXEC Score:${man.exScore||"N/A"} Grade:${man.exGrade} FTC:${man.ftc||"N/A"} Action:${man.action} Formation:${man.form} Notes:${man.notes||"none"}` };
+        ? { type: "image", imageB64: b64, activeIndicators: indicators, marketContext, currentPrice: priceAnchor, tf: man.tf }
+        : { type: "manual", activeIndicators: indicators, marketContext, currentPrice: priceAnchor, tf: man.tf, manualText: `TDL Manual Input — Ticker:${man.ticker||"N/A"} TF:${man.tf} Direction:${man.dir} IEA Regime:${man.regime} Edge Score:${man.edge||"N/A"} Signal:${man.sig} AWA Block:${man.block} Volume:${man.vol} Quality:${man.qual} Wave Momentum:${man.mom} Squeeze:${man.sqz} EXEC Score:${man.exScore||"N/A"} Grade:${man.exGrade} FTC:${man.ftc||"N/A"} Action:${man.action} Formation:${man.form} Notes:${man.notes||"none"}` };
 
       const r = await fetch("/api/analyze", {
         method: "POST",
@@ -163,10 +183,12 @@ export function CoPilotApp({ userId }: { userId: string }) {
     if (!fq.trim() || !res) return;
     setFb(true);
     try {
+      // Compress priorResult to save tokens
+      const slim = { verdict: res.verdict, grade: res.grade, score: res.score, ticker: res.ticker, tf: res.tf, dir: res.dir, levels: res.levels, warnings: res.warnings, entry_trigger: res.entry_trigger, invalidation: res.invalidation };
       const r = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ followUp: fq, priorResult: res }),
+        body: JSON.stringify({ followUp: fq, priorResult: slim }),
       });
       const data = await r.json();
       setFa(data.answer || "");
@@ -189,8 +211,28 @@ export function CoPilotApp({ userId }: { userId: string }) {
     inp: { background:"#060a0f", border:"1px solid #1a2f45", color:"#c8d4e0", padding:"6px 8px", fontFamily:"monospace", fontSize:11, outline:"none", borderRadius:2, width:"100%" },
     lbl: { color:"#2a5a7f", fontSize:9, letterSpacing:1, marginBottom:3, display:"block" as const },
     seclbl: { color:"#0ea5e9", fontSize:9, letterSpacing:2, marginBottom:10, display:"block" as const },
+    zonelbl: { color:"#0ea5e9", fontSize:8, letterSpacing:3, marginBottom:8, display:"block" as const, paddingBottom:6, borderBottom:"1px solid #0ea5e920" },
     row: { display:"flex", justifyContent:"space-between", padding:"3px 0", borderBottom:"1px solid #0a0f14", fontSize:11 },
   };
+
+  const confBadge = (conf?: ConfidenceLevel) => {
+    if (!conf) return null;
+    const col = conf === "high" ? "#00ff88" : conf === "medium" ? "#ffd700" : "#ff6666";
+    return <span style={{ float:"right" as const, fontSize:8, color:col, border:`1px solid ${col}30`, padding:"1px 5px", borderRadius:2, letterSpacing:1 }}>{conf.toUpperCase()}</span>;
+  };
+
+  const scoreColor = (s: number) => s >= 8 ? "#00ff88" : s >= 6 ? "#7fff00" : s >= 4 ? "#ffd700" : "#ff4444";
+  const sizeNote = (s: number, warnings: string[] = []) => {
+    if (s >= 8 && warnings.length === 0) return { label: "FULL SIZE", color: "#00ff88" };
+    if (s >= 6) return { label: "HALF SIZE", color: "#ffd700" };
+    return { label: "NO TRADE / SIT OUT", color: "#ff4444" };
+  };
+
+  const hasTechnicals = (r: Result) => r.technicals && (
+    r.technicals.candle || r.technicals.structure ||
+    (r.technicals.key_levels?.length ?? 0) > 0 ||
+    r.technicals.range_position || r.technicals.momentum
+  );
 
   return (
     <div style={S.page}>
@@ -222,12 +264,12 @@ export function CoPilotApp({ userId }: { userId: string }) {
           </div>
         </div>
 
-        {/* COMPLIANCE DISCLAIMER */}
+        {/* COMPLIANCE */}
         <div style={{ background:"#0a0f14", border:"1px solid #1a2f45", borderLeft:"2px solid #ffd700", padding:"8px 12px", marginBottom:12, fontSize:9, color:"#6a7a60", lineHeight:1.6 }}>
           ⚠ <span style={{ color:"#7a8a70", letterSpacing:0.5 }}>FOR EDUCATIONAL USE ONLY. This tool does not constitute financial advice, investment recommendations, or trading signals. Past performance is not indicative of future results. Trading futures and options involves substantial risk of loss. You are solely responsible for your trading decisions. Not affiliated with or endorsed by the CFTC, NFA, or any regulatory body.</span>
         </div>
 
-        {/* LIVE MARKET TICKER */}
+        {/* LIVE TICKER */}
         {quotes.length > 0 && (
           <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" as const }}>
             {quotes.map(q => {
@@ -237,9 +279,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
                 <div key={q.label} style={{ background:"#0d1117", border:"1px solid #1a2f45", padding:"5px 10px", borderRadius:2, display:"flex", gap:8, alignItems:"center" }}>
                   <span style={{ color:"#2a5a7f", fontSize:9, letterSpacing:1 }}>{q.label}</span>
                   <span style={{ color:"#c8d4e0", fontSize:11, fontWeight:"bold" }}>{q.price ? q.price.toFixed(2) : "—"}</span>
-                  {q.change !== null && (
-                    <span style={{ color:col, fontSize:9 }}>{up ? "▲" : "▼"} {Math.abs(q.change).toFixed(2)}%</span>
-                  )}
+                  {q.change !== null && <span style={{ color:col, fontSize:9 }}>{up ? "▲" : "▼"} {Math.abs(q.change).toFixed(2)}%</span>}
                 </div>
               );
             })}
@@ -293,7 +333,7 @@ export function CoPilotApp({ userId }: { userId: string }) {
               )}
             </div>
             <div style={{ color:"#1a4060", fontSize:9, textAlign:"center", marginBottom:10 }}>
-              💡 You can also <span style={{ color:"#0ea5e9" }}>Ctrl+V / Cmd+V</span> to paste a screenshot directly
+              💡 <span style={{ color:"#0ea5e9" }}>Ctrl+V / Cmd+V</span> to paste directly
             </div>
           </>
         )}
@@ -327,15 +367,33 @@ export function CoPilotApp({ userId }: { userId: string }) {
                   {t==="inp"?<input style={S.inp} value={man[k as keyof typeof man]} onChange={e=>setMan({...man,[k as string]:e.target.value})} placeholder={o as string}/>:<select style={S.sel} value={man[k as keyof typeof man]} onChange={e=>setMan({...man,[k as string]:e.target.value})}>{(o as string[]).map(x=><option key={x}>{x}</option>)}</select>}
                 </div>
               ))}
-              {activeInds.has("form") && ([["FORMATION","form","sel",["None","ABW","DBW","CFB","Inside Bar","2U","2D","3U","3D"]]] as [string,string,string,unknown][]).map(([l,k,t,o])=>(
-                <div key={k as string}><span style={S.lbl}>{l}</span>
-                  <select style={S.sel} value={man[k as keyof typeof man]} onChange={e=>setMan({...man,[k as string]:e.target.value})}>{(o as string[]).map(x=><option key={x}>{x}</option>)}</select>
+              {activeInds.has("form") && (
+                <div><span style={S.lbl}>FORMATION</span>
+                  <select style={S.sel} value={man.form} onChange={e=>setMan({...man,form:e.target.value})}>
+                    {["None","ABW","DBW","CFB","Inside Bar","2U","2D","3U","3D"].map(x=><option key={x}>{x}</option>)}
+                  </select>
                 </div>
-              ))}
+              )}
               <div style={{ gridColumn:"span 2" }}><span style={S.lbl}>NOTES</span><input style={S.inp} value={man.notes} onChange={e=>setMan({...man,notes:e.target.value})} placeholder="Additional context..."/></div>
             </div>
           </div>
         )}
+
+        {/* PRICE + TF */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+          <div>
+            <span style={S.lbl}>CURRENT PRICE <span style={{ color:"#1a4060" }}>(optional)</span></span>
+            <input style={S.inp} value={currentPrice} onChange={e=>setCurrentPrice(e.target.value)} placeholder="e.g. 24730.50"/>
+          </div>
+          {tab === "upload" && (
+            <div>
+              <span style={S.lbl}>CHART TIMEFRAME</span>
+              <select style={S.sel} value={man.tf} onChange={e=>setMan({...man,tf:e.target.value})}>
+                {["1m","2m","3m","5m","15m","30m","1h","2h","4h","D","W"].map(x=><option key={x}>{x}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
 
         <button className="btn" onClick={analyze} disabled={busy||(tab==="upload"&&!b64)||activeInds.size===0}
           style={{ width:"100%", padding:"12px", border:"1px solid #0ea5e9", background:busy?"#0d1117":"#0ea5e910", color:"#0ea5e9", fontFamily:"monospace", fontSize:11, letterSpacing:3, cursor:"pointer", borderRadius:2, marginBottom:13, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
@@ -352,130 +410,237 @@ export function CoPilotApp({ userId }: { userId: string }) {
           </div>
         )}
 
-        {res && !res.blocked && g && v && dc && (
-          <div className="si">
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:8 }}>
-              {([[res.grade,"SETUP GRADE",g],[res.verdict,"VERDICT",v],[res.dir,"DIRECTION",dc]] as [string,string,string[]][]).map(([val,lbl,st])=>(
-                <div key={lbl} style={{ background:st[0], border:`1px solid ${st[1]}`, padding:"12px", textAlign:"center" }}>
-                  <div style={{ color:"#2a5a7f", fontSize:9, letterSpacing:2, marginBottom:5 }}>{lbl}</div>
-                  <div style={{ color:st[2], fontFamily:"Georgia,serif", fontSize:18, fontWeight:"bold", letterSpacing:2 }}>{val}</div>
-                </div>
-              ))}
-            </div>
+        {res && !res.blocked && g && v && dc && (() => {
+          const displayScore = getDisplayScore(res);
+          const size = sizeNote(displayScore, res.warnings);
+          const isNoTrade = res.verdict === "NO TRADE";
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
-              <div style={S.panel}>
-                <span style={S.lbl}>INSTRUMENT</span>
-                <div style={{ fontFamily:"Georgia,serif", fontSize:16, letterSpacing:2, fontWeight:"bold" }}>{res.ticker} <span style={{ fontSize:11, color:"#2a5a7f", fontWeight:"normal" }}>{res.tf}</span></div>
-                {res.pattern && <div style={{ color:"#ffd700", fontSize:10, marginTop:5, letterSpacing:1 }}>◆ {res.pattern}</div>}
-              </div>
-              <div style={S.panel}>
-                <span style={S.lbl}>CONFLUENCE {res.score}/10</span>
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
-                  <div style={{ flex:1, height:5, background:"#1a2f45", borderRadius:3, overflow:"hidden" }}>
-                    <div style={{ width:`${Math.min(100,(res.score||0)*10)}%`, height:"100%", borderRadius:3, background:(res.score||0)>=8?"#00ff88":(res.score||0)>=6?"#7fff00":(res.score||0)>=4?"#ffd700":"#ff4444" }}/>
+          return (
+            <div className="si">
+
+              {/* ── ZONE 1: DECISION ── */}
+              <div style={{ background:"#090e15", border:"1px solid #1a2f45", borderTop:"2px solid #0ea5e9", padding:"14px", marginBottom:8 }}>
+                <span style={S.zonelbl}>ZONE 1 · DECISION</span>
+
+                <div style={{ background:v[0], border:`2px solid ${v[1]}`, padding:"16px", textAlign:"center", marginBottom:10 }}>
+                  <div style={{ color:"#2a5a7f", fontSize:9, letterSpacing:3, marginBottom:6 }}>VERDICT</div>
+                  <div style={{ color:v[2], fontFamily:"Georgia,serif", fontSize:28, fontWeight:"bold", letterSpacing:4 }}>{res.verdict}</div>
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:10 }}>
+                  {([[res.grade,"GRADE",g],[res.dir,"DIRECTION",dc],[`${res.ticker||"—"} ${res.tf||""}`.trim(),"INSTRUMENT",["#ffffff05","#2a5a7f","#4a8aaa"]]] as [string,string,string[]][]).map(([val,lbl,st])=>(
+                    <div key={lbl} style={{ background:st[0], border:`1px solid ${st[1]}40`, padding:"10px", textAlign:"center" }}>
+                      <div style={{ color:"#2a5a7f", fontSize:8, letterSpacing:2, marginBottom:4 }}>{lbl}</div>
+                      <div style={{ color:st[2], fontFamily:"Georgia,serif", fontSize:14, fontWeight:"bold", letterSpacing:1 }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {res.entry_trigger && res.verdict === "WAIT" && (
+                  <div style={{ background:"#ffd70008", border:"1px solid #ffd70040", borderLeft:"3px solid #ffd700", padding:"10px 14px", marginBottom:8 }}>
+                    <span style={{ color:"#ffd700", fontSize:9, letterSpacing:2, display:"block", marginBottom:5 }}>⏳ ENTRY TRIGGER — WHAT FLIPS THIS TO GO</span>
+                    <div style={{ color:"#e8d070", fontSize:12, lineHeight:1.7 }}>{res.entry_trigger}</div>
                   </div>
-                  <span style={{ fontFamily:"Georgia,serif", fontSize:14, fontWeight:"bold", minWidth:24 }}>{res.score}</span>
-                </div>
-              </div>
-            </div>
+                )}
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
-              {activeInds.has("iea") && res.iea && (
-                <div style={S.panel}><span style={S.seclbl}>IEA v8.5</span>
-                  {[["REGIME",res.iea.regime],["EDGE SCORE",res.iea.edge],["SIGNAL",res.iea.signal]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-              {activeInds.has("awa") && res.awa && (
-                <div style={S.panel}><span style={S.seclbl}>AWA</span>
-                  {[["BLOCK",res.awa.block],["VOLUME",res.awa.vol],["QUALITY",res.awa.quality]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:val==="Loud"?"#00ff88":"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-              {activeInds.has("wave") && res.wave && (
-                <div style={S.panel}><span style={S.seclbl}>WAVEOSCPRO</span>
-                  {[["MOMENTUM",res.wave.mom],["SQUEEZE",res.wave.squeeze]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-              {activeInds.has("exec") && res.exec && (
-                <div style={S.panel}><span style={S.seclbl}>TRADE EXECUTION SUITE</span>
-                  {[["SCORE/GRADE",`${res.exec.score||"—"} ${res.exec.grade||""}`],["FTC",res.exec.ftc],["ACTION",res.exec.action],["FORMATION",res.exec.formation]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:val==="Go"?"#00ff88":"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-              {activeInds.has("delta") && res.delta && (
-                <div style={S.panel}><span style={S.seclbl}>DELTA FLOW PRO</span>
-                  {[["DIRECTION",res.delta.direction],["ABSORPTION",res.delta.absorption],["IMBALANCE",res.delta.imbalance]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-              {activeInds.has("mtf") && res.mtf && (
-                <div style={S.panel}><span style={S.seclbl}>MTF REACTION ZONES</span>
-                  {[["ZONE",res.mtf.zone],["TYPE",res.mtf.type],["REACTION",res.mtf.reaction]].map(([k,val])=>(
-                    <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ ...S.panel, marginBottom:8 }}>
-              <span style={S.seclbl}>CONFLUENCE CHECKLIST</span>
-              {res.checklist?.map((c,i)=>(
-                <div key={i} className="cr" style={{ display:"flex", alignItems:"flex-start", gap:7, padding:"4px 0", borderBottom:"1px solid #0a0f14" }}>
-                  <div style={{ width:15, height:15, border:`1px solid ${c.met?"#00ff88":"#ff4444"}`, background:c.met?"#00ff8815":"#ff000015", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:9, color:c.met?"#00ff88":"#ff4444" }}>{c.met?"✓":"✗"}</div>
-                  <div style={{ fontSize:11 }}><span style={{ color:c.met?"#c8d4e0":"#3a6a7a" }}>{c.item}</span>{c.note&&<span style={{ color:"#2a5a7f", marginLeft:6 }}>· {c.note}</span>}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ ...S.panel, marginBottom:8 }}>
-              <span style={S.seclbl}>KEY LEVELS</span>
-              <div style={{ color:"#1a3a50", fontSize:9, marginBottom:8 }}>⚠ Image analysis: levels are approximate zones — confirm exact prices on your chart</div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6 }}>
-                {([["ENTRY",res.levels?.entry,"#ffd700"],["STOP",res.levels?.stop,"#ff4444"],["TARGET 1",res.levels?.t1,"#00ff88"],["TARGET 2",res.levels?.t2,"#00cc66"],["R:R",res.levels?.rr,"#0ea5e9"]] as [string,string|undefined,string][]).map(([l,val,c])=>(
-                  <div key={l} style={{ background:"#060a0f", padding:"7px 4px", textAlign:"center", borderRadius:2 }}>
-                    <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:3 }}>{l}</div>
-                    <div style={{ color:val&&val!=="null"?c:"#1a3a50", fontSize:10 }}>{val&&val!=="null"?val:"—"}</div>
+                {res.invalidation && !isNoTrade && (
+                  <div style={{ background:"#ff000008", border:"1px solid #ff444430", borderLeft:"3px solid #ff4444", padding:"10px 14px" }}>
+                    <span style={{ color:"#ff6666", fontSize:9, letterSpacing:2, display:"block", marginBottom:5 }}>✗ SETUP INVALIDATED IF</span>
+                    <div style={{ color:"#c87070", fontSize:12, lineHeight:1.7 }}>{res.invalidation}</div>
                   </div>
-                ))}
+                )}
               </div>
-            </div>
 
-            <div style={{ background:"#060d15", border:"1px solid #1a2f45", borderLeft:"2px solid #0ea5e9", padding:13, marginBottom:8 }}>
-              <span style={S.seclbl}>TRADE NARRATIVE</span>
-              <div style={{ color:"#c8d4e0", lineHeight:1.75, fontSize:13 }}>{res.narrative}</div>
-            </div>
+              {isNoTrade ? (
+                (res.warnings?.length ?? 0) > 0 ? (
+                  <div style={{ background:"#ffd70008", border:"1px solid #ffd70030", padding:11, marginBottom:8 }}>
+                    <span style={{ color:"#ffd700", fontSize:9, letterSpacing:2, marginBottom:6, display:"block" }}>⚠ REASON</span>
+                    {res.warnings!.map((w,i)=><div key={i} style={{ color:"#b89000", fontSize:11, padding:"2px 0" }}>· {w}</div>)}
+                  </div>
+                ) : null
+              ) : (
+                <>
+                  {/* ── ZONE 2: EVIDENCE ── */}
+                  <div style={{ background:"#090e15", border:"1px solid #1a2f45", padding:"14px", marginBottom:8 }}>
+                    <span style={S.zonelbl}>ZONE 2 · EVIDENCE</span>
 
-            {(res.warnings?.length||0)>0 && (
-              <div style={{ background:"#ffd70008", border:"1px solid #ffd70030", padding:11, marginBottom:8 }}>
-                <span style={{ color:"#ffd700", fontSize:9, letterSpacing:2, marginBottom:6, display:"block" }}>⚠ RISK FLAGS</span>
-                {res.warnings!.map((w,i)=><div key={i} style={{ color:"#b89000", fontSize:11, padding:"2px 0" }}>· {w}</div>)}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
+                      <div style={S.panel}>
+                        <span style={S.lbl}>CONFLUENCE SCORE</span>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
+                          <div style={{ flex:1, height:6, background:"#1a2f45", borderRadius:3, overflow:"hidden" }}>
+                            <div style={{ width:`${Math.min(100,displayScore*10)}%`, height:"100%", borderRadius:3, background:scoreColor(displayScore) }}/>
+                          </div>
+                          <span style={{ fontFamily:"Georgia,serif", fontSize:18, fontWeight:"bold", color:scoreColor(displayScore), minWidth:28 }}>{displayScore}</span>
+                        </div>
+                      </div>
+                      <div style={{ ...S.panel, display:"flex", flexDirection:"column" as const, justifyContent:"center", alignItems:"center", textAlign:"center" }}>
+                        <span style={S.lbl}>POSITION SIZE</span>
+                        <span style={{ color:size.color, fontFamily:"Georgia,serif", fontSize:13, fontWeight:"bold", letterSpacing:1, marginTop:4 }}>{size.label}</span>
+                      </div>
+                    </div>
+
+                    {res.pattern && (
+                      <div style={{ marginBottom:10, padding:"8px 12px", background:"#ffd70008", border:"1px solid #ffd70030", borderRadius:2 }}>
+                        <span style={{ color:"#2a5a7f", fontSize:9, letterSpacing:1 }}>PATTERN · </span>
+                        <span style={{ color:"#ffd700", fontSize:11, letterSpacing:1 }}>◆ {res.pattern}</span>
+                      </div>
+                    )}
+
+                    {/* TECHNICALS PANEL */}
+                    {hasTechnicals(res) && (
+                      <div style={{ ...S.panel, marginBottom:10, borderLeft:"2px solid #7b68ee" }}>
+                        <span style={{ ...S.seclbl, color:"#9b88ee" }}>PRICE ACTION / TECHNICALS</span>
+                        {res.technicals?.structure && (
+                          <div style={S.row}>
+                            <span style={{ color:"#2a5a7f" }}>STRUCTURE</span>
+                            <span style={{ color: res.technicals.structure === "Uptrend" ? "#00ff88" : res.technicals.structure === "Downtrend" ? "#ff4444" : "#ffd700" }}>
+                              {res.technicals.structure}
+                            </span>
+                          </div>
+                        )}
+                        {res.technicals?.range_position && (
+                          <div style={S.row}>
+                            <span style={{ color:"#2a5a7f" }}>RANGE POSITION</span>
+                            <span style={{ color:"#c8d4e0" }}>{res.technicals.range_position}</span>
+                          </div>
+                        )}
+                        {res.technicals?.candle && (
+                          <div style={{ padding:"5px 0", borderBottom:"1px solid #0a0f14" }}>
+                            <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:3 }}>CANDLE CONTEXT</div>
+                            <div style={{ color:"#c8d4e0", fontSize:11 }}>{res.technicals.candle}</div>
+                          </div>
+                        )}
+                        {res.technicals?.momentum && (
+                          <div style={{ padding:"5px 0", borderBottom:"1px solid #0a0f14" }}>
+                            <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:3 }}>MOMENTUM</div>
+                            <div style={{ color:"#c8d4e0", fontSize:11 }}>{res.technicals.momentum}</div>
+                          </div>
+                        )}
+                        {(res.technicals?.key_levels?.length ?? 0) > 0 && (
+                          <div style={{ padding:"5px 0" }}>
+                            <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:4 }}>KEY LEVELS FROM CHART</div>
+                            {res.technicals!.key_levels!.map((lvl,i) => (
+                              <div key={i} style={{ color:"#a8b4c0", fontSize:10, padding:"2px 0" }}>· {lvl}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* INDICATOR PANELS */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                      {activeInds.has("iea") && res.iea && (
+                        <div style={S.panel}><span style={S.seclbl}>IEA v8.5{confBadge(res.iea.confidence)}</span>
+                          {[["REGIME",res.iea.regime],["EDGE SCORE",res.iea.edge],["SIGNAL",res.iea.signal]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {activeInds.has("awa") && res.awa && (
+                        <div style={S.panel}><span style={S.seclbl}>AWA{confBadge(res.awa.confidence)}</span>
+                          {[["BLOCK",res.awa.block],["VOLUME",res.awa.vol],["QUALITY",res.awa.quality]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:val==="Loud"?"#00ff88":"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {activeInds.has("wave") && res.wave && (
+                        <div style={S.panel}><span style={S.seclbl}>WAVEOSCPRO{confBadge(res.wave.confidence)}</span>
+                          {[["MOMENTUM",res.wave.mom],["SQUEEZE",res.wave.squeeze]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {activeInds.has("exec") && res.exec && (
+                        <div style={S.panel}><span style={S.seclbl}>EXEC SUITE{confBadge(res.exec.confidence)}</span>
+                          {[["GRADE",res.exec.grade],["FTC",res.exec.ftc],["ACTION",res.exec.action],["FORMATION",res.exec.formation]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:val==="Go"?"#00ff88":"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {activeInds.has("delta") && res.delta && (
+                        <div style={S.panel}><span style={S.seclbl}>DELTA FLOW{confBadge(res.delta.confidence)}</span>
+                          {[["DIRECTION",res.delta.direction],["ABSORPTION",res.delta.absorption],["IMBALANCE",res.delta.imbalance]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {activeInds.has("mtf") && res.mtf && (
+                        <div style={S.panel}><span style={S.seclbl}>MTF ZONES{confBadge(res.mtf.confidence)}</span>
+                          {[["ZONE",res.mtf.zone],["TYPE",res.mtf.type],["REACTION",res.mtf.reaction]].map(([k,val])=>(
+                            <div key={k} style={S.row}><span style={{ color:"#2a5a7f" }}>{k}</span><span style={{ color:"#c8d4e0" }}>{val||"—"}</span></div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CHECKLIST */}
+                    <div style={S.panel}>
+                      <span style={S.seclbl}>CONFLUENCE CHECKLIST</span>
+                      {res.checklist?.map((c,i)=>(
+                        <div key={i} className="cr" style={{ display:"flex", alignItems:"flex-start", gap:7, padding:"4px 0", borderBottom:"1px solid #0a0f14" }}>
+                          <div style={{ width:15, height:15, border:`1px solid ${c.met?"#00ff88":"#ff4444"}`, background:c.met?"#00ff8815":"#ff000015", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:9, color:c.met?"#00ff88":"#ff4444" }}>{c.met?"✓":"✗"}</div>
+                          <div style={{ fontSize:11 }}><span style={{ color:c.met?"#c8d4e0":"#3a6a7a" }}>{c.item}</span>{c.note&&<span style={{ color:"#2a5a7f", marginLeft:6 }}>· {c.note}</span>}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {(res.warnings?.length||0)>0 && (
+                      <div style={{ background:"#ffd70008", border:"1px solid #ffd70030", padding:11, marginTop:8 }}>
+                        <span style={{ color:"#ffd700", fontSize:9, letterSpacing:2, marginBottom:6, display:"block" }}>⚠ RISK FLAGS</span>
+                        {res.warnings!.map((w,i)=><div key={i} style={{ color:"#b89000", fontSize:11, padding:"2px 0" }}>· {w}</div>)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── ZONE 3: EXECUTION ── */}
+                  <div style={{ background:"#090e15", border:"1px solid #1a2f45", padding:"14px", marginBottom:8 }}>
+                    <span style={S.zonelbl}>ZONE 3 · EXECUTION</span>
+                    <div style={{ color:"#1a3a50", fontSize:9, marginBottom:8 }}>⚠ Levels are approximate zones — confirm exact prices on your chart before entering</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6, marginBottom:12 }}>
+                      {([["ENTRY",res.levels?.entry,"#ffd700"],["STOP",res.levels?.stop,"#ff4444"],["TARGET 1",res.levels?.t1,"#00ff88"],["TARGET 2",res.levels?.t2,"#00cc66"],["R:R",res.levels?.rr,"#0ea5e9"]] as [string,string|undefined,string][]).map(([l,val,c])=>(
+                        <div key={l} style={{ background:"#060a0f", padding:"10px 4px", textAlign:"center", borderRadius:2, border:`1px solid ${val&&val!=="null"?c+"30":"#1a2f45"}` }}>
+                          <div style={{ color:"#2a5a7f", fontSize:9, marginBottom:4 }}>{l}</div>
+                          <div style={{ color:val&&val!=="null"?c:"#1a3a50", fontSize:11, fontWeight:"bold" }}>{val&&val!=="null"?val:"—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ background:"#060d15", borderLeft:"2px solid #0ea5e9", padding:"12px 14px" }}>
+                      <span style={{ color:"#0ea5e9", fontSize:9, letterSpacing:2, display:"block", marginBottom:8 }}>TRADE NARRATIVE</span>
+                      <div style={{ color:"#c8d4e0", lineHeight:1.8, fontSize:13 }}>{res.narrative}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ── ZONE 4: ASK CO-PILOT ── */}
+              <div style={{ background:"#090e15", border:"1px solid #1a2f45", padding:"14px", marginBottom:8 }}>
+                <span style={S.zonelbl}>ZONE 4 · ASK CO-PILOT</span>
+                <div style={{ background:"#080c10", border:"1px solid #1a2f45", padding:"8px 12px", marginBottom:10, fontSize:9, color:"#3a4a35", lineHeight:1.6, textAlign:"center" }}>
+                  Educational purposes only — not financial or investment advice.
+                </div>
+                <div style={{ display:"flex", gap:7, marginBottom:8 }}>
+                  <input value={fq} onChange={e=>setFq(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askFollowUp()} placeholder="What's max loss on 2 contracts? Where would you add? What invalidates this?" style={{ ...S.inp, flex:1 }}/>
+                  <button onClick={askFollowUp} disabled={fb||!fq.trim()} style={{ background:"#1a2f45", border:"1px solid #0ea5e9", color:"#0ea5e9", padding:"0 13px", fontFamily:"monospace", fontSize:10, cursor:"pointer", letterSpacing:1, opacity:fb?0.4:1, whiteSpace:"nowrap" }}>
+                    {fb?"...":"SEND →"}
+                  </button>
+                </div>
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" as const, marginBottom:fa?10:0 }}>
+                  {([
+                    res.ticker?.toUpperCase().includes("NQ") ? "Max loss on 2 NQ contracts at this stop?" : null,
+                    res.verdict === "WAIT" ? "What does this look like if trigger fires at 3pm?" : null,
+                    "What would strengthen this setup to an A+?",
+                    (res.warnings?.length ?? 0) > 0 ? "How do these warnings affect position size?" : "What are the key risk factors here?",
+                  ] as (string|null)[]).filter(Boolean).slice(0,3).map((q,i)=>(
+                    <button key={i} onClick={()=>setFq(q!)} style={{ fontSize:9, color:"#4a6a8a", background:"#0D1220", border:"1px solid #1A2A3A", borderRadius:20, padding:"4px 10px", cursor:"pointer", fontFamily:"monospace" }}>{q}</button>
+                  ))}
+                </div>
+                {fa && <div style={{ marginTop:9, padding:11, background:"#060a0f", borderLeft:"2px solid #0ea5e9", color:"#c8d4e0", lineHeight:1.7, fontSize:12, whiteSpace:"pre-wrap" }}>{fa}</div>}
               </div>
-            )}
 
-            <div style={{ background:"#080c10", border:"1px solid #1a2f45", padding:"8px 12px", marginBottom:8, fontSize:9, color:"#3a4a35", lineHeight:1.6, textAlign:"center" }}>
-              This analysis is for educational purposes only and does not constitute financial or investment advice. Always conduct your own research and consult a qualified financial advisor before trading.
             </div>
-
-            <div style={S.panel}>
-              <span style={S.seclbl}>ASK CO-PILOT</span>
-              <div style={{ display:"flex", gap:7 }}>
-                <input value={fq} onChange={e=>setFq(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askFollowUp()} placeholder="What's the invalidation level? Where to add?" style={{ ...S.inp, flex:1 }}/>
-                <button onClick={askFollowUp} disabled={fb||!fq.trim()} style={{ background:"#1a2f45", border:"1px solid #0ea5e9", color:"#0ea5e9", padding:"0 13px", fontFamily:"monospace", fontSize:10, cursor:"pointer", letterSpacing:1, opacity:fb?0.4:1, whiteSpace:"nowrap" }}>
-                  {fb?"...":"SEND →"}
-                </button>
-              </div>
-              {fa && <div style={{ marginTop:9, padding:11, background:"#060a0f", borderLeft:"2px solid #0ea5e9", color:"#c8d4e0", lineHeight:1.7, fontSize:12, whiteSpace:"pre-wrap" }}>{fa}</div>}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         <div style={{ borderTop:"1px solid #1a2f45", marginTop:18, paddingTop:10, color:"#1a3050", fontSize:9, letterSpacing:1, display:"flex", justifyContent:"space-between" }}>
           <span>TDL TRADE CO-PILOT · EDUCATIONAL USE ONLY</span>
